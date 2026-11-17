@@ -182,13 +182,17 @@ export function planFetch(
     }
   }
 
-  // which haves the server acknowledges: those inside the wanted closure. A fetch with
-  // no haves needs no closure walk at all (a depth-1 clone of a long history must not
-  // pay for one).
+  // the closure of the wants: the non-depth send set is built from it, and the ACKs
+  // are the haves inside it. A depth fetch with no haves needs no closure walk at all
+  // (a depth-1 clone of a long history must not pay for one), so it is computed only
+  // when the send set or the ACKs need it.
+  let wantClosure: Set<string> | null = null;
+  if (haves.length || depth == null) {
+    wantClosure = collectReachable(wantCommits, lookup, { allowMissing: true });
+  }
   let acks: string[] = [];
   let ready = false;
-  if (haves.length) {
-    const wantClosure = collectReachable(wantCommits, lookup, { allowMissing: true });
+  if (haves.length && wantClosure) {
     acks = haves.filter((have) => wantClosure.has(have));
     ready = acks.length === haves.length;
   }
@@ -237,7 +241,9 @@ export function planFetch(
     void deepenSince;
   } else {
     sendCommits = new Set<string>();
-    for (const oid of wantClosure) if (!haveClosure.has(oid)) sendCommits.add(oid);
+    if (wantClosure) {
+      for (const oid of wantClosure) if (!haveClosure.has(oid)) sendCommits.add(oid);
+    }
   }
 
   // the objects to send: each new commit plus its tree closure (its tree and its blobs),
