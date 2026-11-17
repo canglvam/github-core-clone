@@ -14,6 +14,7 @@ import {
   encodePktLine,
   isObjectId,
   parseCommit,
+  parseTree,
   pktDelim,
   pktFlush,
   readPack,
@@ -181,10 +182,16 @@ export function planFetch(
     }
   }
 
-  // which haves the server acknowledges: those inside the wanted closure
-  const wantClosure = collectReachable(wantCommits, lookup, { allowMissing: true });
-  const acks = haves.filter((have) => wantClosure.has(have));
-  const ready = haves.length > 0 && acks.length === haves.length;
+  // which haves the server acknowledges: those inside the wanted closure. A fetch with
+  // no haves needs no closure walk at all (a depth-1 clone of a long history must not
+  // pay for one).
+  let acks: string[] = [];
+  let ready = false;
+  if (haves.length) {
+    const wantClosure = collectReachable(wantCommits, lookup, { allowMissing: true });
+    acks = haves.filter((have) => wantClosure.has(have));
+    ready = acks.length === haves.length;
+  }
 
   let sendCommits: Set<string>;
   let shallow: string[] = [];
@@ -233,9 +240,29 @@ export function planFetch(
     for (const oid of wantClosure) if (!haveClosure.has(oid)) sendCommits.add(oid);
   }
 
+  // the objects to send: each new commit plus its tree closure (its tree and its blobs),
+  // never a parent commit. A parent the client already holds — or one that lies beyond
+  // the depth — is not sent: walking the full closure of the new commits would re-send
+  // both. A tag object the client asked for is sent even when its commit is already held.
   const sendOids = new Set<string>(extraObjects);
-  for (const oid of collectReachable(sendCommits, lookup, { allowMissing: true })) sendOids.add(oid);
-  // a tag object the client asked for is sent even when its commit is already held
+  for (const commitOid of sendCommits) {
+    if (!haveClosure.has(commitOid)) sendOids.add(commitOid);
+    const commit = store.lookup(commitOid);
+    if (!commit || commit.type !== 'commit') continue;
+    const stack = [parseCommit(commit.data).tree];
+    while (stack.length) {
+      const oid = stack.pop()!;
+      if (sendOids.has(oid) || haveClosure.has(oid)) continue;
+      const object = store.lookup(oid);
+      if (!object) continue;
+      sendOids.add(oid);
+      if (object.type === 'tree') {
+        for (const entry of parseTree(object.data)) {
+          if (entry.mode !== '160000') stack.push(entry.oid);
+        }
+      }
+    }
+  }
   const objects: GitObject[] = [];
   for (const oid of sendOids) {
     const object = store.lookup(oid);

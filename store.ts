@@ -100,15 +100,6 @@ export interface ChangedFile {
   changes: number;
 }
 
-const DEFAULT_LABEL_COLORS: Record<string, string> = {
-  bug: 'd73a4a',
-  enhancement: 'a2eeef',
-  documentation: '0075ca',
-  question: 'd876e3',
-  'good first issue': '7057ff',
-  'help wanted': '008672',
-};
-
 export function encodeRepoDirName(name: string): string {
   return encodeURIComponent(name);
 }
@@ -353,9 +344,9 @@ export class ForgeStore {
       defaultBranch: 'main',
       createdSeq: this.seq,
       refs: {},
-      labels: ['bug', 'enhancement', 'documentation', 'question', 'good first issue', 'help wanted'].map(
-        (label) => ({ name: label, color: DEFAULT_LABEL_COLORS[label] ?? '000000' }),
-      ),
+      // a new repository starts with no labels: the suite creates each label it uses
+      // through POST /labels, and a pre-seeded label would make that create a 422
+      labels: [],
       issues: [],
       pulls: [],
       comments: [],
